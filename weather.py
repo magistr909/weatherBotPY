@@ -86,30 +86,40 @@ else:
 logger.info(f"Запрашиваем прогноз с {start_date.date()} по {(end_date - timedelta(days=1)).date()} для {CITY}")
 
 # === Универсальная обработка данных ===
-def summarize(source_name, temps, winds, rain_probs, conditions):
+def summarize(source_name, temps, winds, rain_probs, conditions, times, mode="default"):
     if not temps:
         logger.warning(f"Нет данных от источника {source_name}")
         return None
     logger.debug(f"Агрегированы данные от {source_name}")
-    return {
-        "source": source_name,
-        "avg_temp": sum(temps) / len(temps),
-        "min_temp": min(temps),
-        "max_temp": max(temps),
-        "avg_wind": sum(winds) / len(winds),
-        "avg_rain": sum(rain_probs) / len(rain_probs) if rain_probs else 0,
-        "conditions": list(set(filter(None, conditions)))
-    }
+    if mode == "default":
+        return {
+            "source": source_name,
+            "avg_temp": sum(temps) / len(temps),
+            "min_temp": min(temps),
+            "max_temp": max(temps),
+            "avg_wind": sum(winds) / len(winds),
+            "avg_rain": sum(rain_probs) / len(rain_probs) if rain_probs else 0,
+            "conditions": list(set(filter(None, conditions)))
+        }
+    else:
+        return {
+           "source": source_name,
+           "temps": temps,
+           "winds": winds,
+           "rain_probs": rain_probs ,
+           "conditions": conditions,
+           "times": times
+        }
 
 # === API-источники ===
-def fetch_open_meteo():
+def fetch_open_meteo(start_date=start_date, end_date=end_date, mode="default"):
     url = f"https://api.open-meteo.com/v1/forecast?latitude={LAT}&longitude={LON}&hourly=temperature_2m,precipitation_probability,windspeed_10m&forecast_days=16&timezone=UTC"
     logger.debug(f"Запрос к Open-Meteo: {url}")
     data = cached_request("open_meteo", url)
     if not data:
         return None
 
-    temps, winds, conditions, rain_probs = [], [], [], []
+    temps, winds, conditions, rain_probs, times = [], [], [], [], []
     for t, temp, rain, wind in zip(
         data["hourly"]["time"],
         data["hourly"]["temperature_2m"],
@@ -122,9 +132,10 @@ def fetch_open_meteo():
             winds.append(wind)
             rain_probs.append(rain)
             conditions.append("")
-    return summarize("Open-Meteo", temps, winds, rain_probs, conditions)
+            times.append(time_obj.isoformat())
+    return summarize("Open-Meteo", temps, winds, rain_probs, conditions, times, mode=mode)
 
-def fetch_weatherapi():
+def fetch_weatherapi(start_date=start_date, end_date=end_date, mode="default"):
     key = CONFIG["apis"]["weatherapi"]["key"]
     url = f"http://api.weatherapi.com/v1/forecast.json?key={key}&q={CITY}&days=10&aqi=no&alerts=no&lang={LANG}"
     logger.debug(f"Запрос к WeatherAPI: {url}")
@@ -132,7 +143,7 @@ def fetch_weatherapi():
     if not data:
         return None
 
-    temps, winds, conditions, rain_probs = [], [], [], []
+    temps, winds, conditions, rain_probs, times = [], [], [], [], []
     for day in data["forecast"]["forecastday"]:
         for hour in day["hour"]:
             time_obj = datetime.fromisoformat(hour["time"])
@@ -141,18 +152,19 @@ def fetch_weatherapi():
                 winds.append(hour["wind_kph"] / 3.6)
                 rain_probs.append(hour["chance_of_rain"])
                 conditions.append(hour["condition"]["text"])
-    return summarize("WeatherAPI", temps, winds, rain_probs, conditions)
+                times.append(time_obj.isoformat())
+    return summarize("WeatherAPI", temps, winds, rain_probs, conditions, times, mode=mode)
 
-def fetch_visual_crossing():
+def fetch_visual_crossing(start_date=start_date, end_date=end_date, mode="default"):
     key = CONFIG["apis"]["visual_crossing"]["key"]
-    date_range = f"{start_date.date()}/{(end_date - timedelta(days=1)).date()}"
+    date_range = f"{start_date.date()}/{(end_date + timedelta(days=7)).date()}"
     url = f"https://weather.visualcrossing.com/VisualCrossingWebServices/rest/services/timeline/{CITY}/{date_range}?unitGroup=metric&include=hours&key={key}&lang={LANG}"
     logger.debug(f"Запрос к Visual Crossing: {url}")
     data = cached_request("visual_crossing", url)
     if not data:
         return None
 
-    temps, winds, conditions, rain_probs = [], [], [], []
+    temps, winds, conditions, rain_probs, times = [], [], [], [], []
     for day in data.get("days", []):
         date_str = day["datetime"]
         for hour in day["hours"]:
@@ -162,7 +174,8 @@ def fetch_visual_crossing():
                 winds.append(hour["windspeed"])
                 rain_probs.append(hour.get("precipprob", 0))
                 conditions.append(hour.get("conditions", ""))
-    return summarize("Visual Crossing", temps, winds, rain_probs, conditions)
+                times.append(full_time.isoformat())
+    return summarize("Visual Crossing", temps, winds, rain_probs, conditions, times, mode=mode)
 
 # === Итоговая агрегация ===
 def aggregate_all(summaries):
@@ -184,13 +197,18 @@ def aggregate_all(summaries):
     }
 
 # === Красивый вывод ===
-def print_table(summaries):
-    print(f"Прогноз с {start_date.date()} по {(end_date - timedelta(days=1)).date()} для {CITY}")
-    print(f"{'Источник':<20} {'Tср':>6} {'Tmin':>6} {'Tmax':>6} {'Ветер':>8} {'Осадки':>8}  Условия")
-    print("-" * 90)
+def print_table(summaries, start_date=start_date, end_date=end_date):
+    final_text = ''
+    final_text += f"Прогноз с {start_date:%Y-%m-%d %H:%M} по {end_date:%Y-%m-%d %H:%M} для {CITY}\n"
+    final_text += f"{"Время":<30} {'Источник':<20} {'Температура':>6} {'Ветер':>8} {'Осадки':>8}  Условия\n"
+    final_text += "-" * 100 + "\n"
+    logger.debug(f"Значение summaries: {summaries}")
     for s in summaries:
-        print(f"{s['source']:<20} {s['avg_temp']:>6.1f} {s['min_temp']:>6.1f} {s['max_temp']:>6.1f} "
-              f"{s['avg_wind']:>8.1f} {s['avg_rain']:>8.0f}%  {', '.join(s['conditions'])}")
+        for t in range(len(s['temps'])):
+            final_text += f"{s['times'][t]:<30} {s['source']:<20} {s['temps'][t]:>6.1f} "
+            final_text += f"{s['winds'][t]:>8.1f} {s['rain_probs'][t]:>8.0f}%  {s['conditions'][t]}\n"
+        final_text += "-" * 100 + "\n"
+    return final_text
 
 if __name__ == "__main__":
     logger.info("Запуск программы")
@@ -203,6 +221,6 @@ if __name__ == "__main__":
     if sources:
         avg_summary = aggregate_all(sources)
         sources.append(avg_summary)
-        print_table(sources)
+        print(print_table(sources))
     else:
         logger.error("Не удалось получить данные ни от одного источника")
