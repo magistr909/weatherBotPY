@@ -1,8 +1,8 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 
-from weather import fetch_open_meteo, fetch_weatherapi, fetch_visual_crossing, aggregate_all
+from weather import fetch_open_meteo, fetch_weatherapi, fetch_visual_crossing, aggregate_all, print_table
 import json
 
 # === Загрузка конфигурации ===
@@ -73,37 +73,41 @@ async def show_weather(update: Update, context: ContextTypes.DEFAULT_TYPE):
     source = query.data
     state = user_state[query.from_user.id]
 
-    start_date = datetime.utcnow()
+    start_date = datetime.now(timezone.utc)
     end_date = start_date + timedelta(hours=state["hours"])
 
     summaries = []
-
+    if state["type"] == "type_summary": mode = "default"
+    elif state["type"] == "type_hourly": mode = "hourly"
     if source == "source_openmeteo":
-        summaries.append(fetch_open_meteo())
+        summaries.append(fetch_open_meteo(start_date, end_date, mode))
     elif source == "source_weatherapi":
-        summaries.append(fetch_weatherapi())
+        summaries.append(fetch_weatherapi(start_date, end_date, mode))
     elif source == "source_visualcrossing":
-        summaries.append(fetch_visual_crossing())
+        summaries.append(fetch_visual_crossing(start_date, end_date, mode))
     else:
         summaries.extend([
-            fetch_open_meteo(),
-            fetch_weatherapi(),
-            fetch_visual_crossing()
+            fetch_open_meteo(start_date, end_date, mode),
+            fetch_weatherapi(start_date, end_date, mode),
+            fetch_visual_crossing(start_date, end_date, mode)
         ])
         summaries = [s for s in summaries if s]
 
     if state["type"] == "type_summary" and len(summaries) > 1:
         summaries.append(aggregate_all(summaries))
-
-    text = f"Погода с {start_date:%Y-%m-%d %H:%M} по {end_date:%Y-%m-%d %H:%M} UTC\n\n"
-    for s in summaries:
-        text += (
-            f"🌍 {s['source']}\n"
-            f"Температура: {s['avg_temp']:.1f}°C (min {s['min_temp']:.1f}°C / max {s['max_temp']:.1f}°C)\n"
-            f"Ветер: {s['avg_wind']:.1f} м/с\n"
-            f"Осадки: {s['avg_rain']:.0f}%\n"
-            f"Условия: {', '.join(s['conditions'])}\n\n"
-        )
+    if state["type"] == "type_summary":
+        text = f"Погода с {start_date:%Y-%m-%d %H:%M} по {end_date:%Y-%m-%d %H:%M} UTC\n\n"
+        for s in summaries:
+            text += (
+                f"🌍 {s['source']}\n"
+                f"Температура: {s['avg_temp']:.1f}°C (min {s['min_temp']:.1f}°C / max {s['max_temp']:.1f}°C)\n"
+                f"Ветер: {s['avg_wind']:.1f} м/с\n"
+                f"Осадки: {s['avg_rain']:.0f}%\n"
+               f"Условия: {', '.join(s['conditions'])}\n\n"
+            )
+    if state["type"] == "type_hourly":
+        text = print_table(summaries)
+        #text = format_table_for_telegram(summaries)
 
     await query.edit_message_text(text)
 
