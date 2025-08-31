@@ -1,9 +1,10 @@
 import os
 import json
 import requests
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import argparse
 from my_logger import Logger
+from zoneinfo import ZoneInfo
 
 # === Константы кеша ===
 CACHE_FILE = ".weather_cache.json"
@@ -127,6 +128,7 @@ def fetch_open_meteo(start_date=start_date, end_date=end_date, mode="default"):
         data["hourly"]["windspeed_10m"]
     ):
         time_obj = datetime.fromisoformat(t)
+        time_obj = time_obj.replace(tzinfo=timezone.utc)
         if start_date <= time_obj < end_date:
             temps.append(temp)
             winds.append(wind)
@@ -146,7 +148,8 @@ def fetch_weatherapi(start_date=start_date, end_date=end_date, mode="default"):
     temps, winds, conditions, rain_probs, times = [], [], [], [], []
     for day in data["forecast"]["forecastday"]:
         for hour in day["hour"]:
-            time_obj = datetime.fromisoformat(hour["time"])
+            time_obj = datetime.fromtimestamp(hour["time_epoch"], tz=ZoneInfo("Etc/GMT-10"))
+            time_obj = time_obj.astimezone(timezone.utc)
             if start_date <= time_obj < end_date:
                 temps.append(hour["temp_c"])
                 winds.append(hour["wind_kph"] / 3.6)
@@ -168,7 +171,8 @@ def fetch_visual_crossing(start_date=start_date, end_date=end_date, mode="defaul
     for day in data.get("days", []):
         date_str = day["datetime"]
         for hour in day["hours"]:
-            full_time = datetime.fromisoformat(f"{date_str}T{hour['datetime']}:00")
+            full_time = datetime.fromtimestamp(hour['datetimeEpoch'], tz=ZoneInfo("Etc/GMT-10"))
+            full_time = full_time.astimezone(timezone.utc)
             if start_date <= full_time < end_date:
                 temps.append(hour["temp"])
                 winds.append(hour["windspeed"])

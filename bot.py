@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 
@@ -73,7 +73,7 @@ async def show_weather(update: Update, context: ContextTypes.DEFAULT_TYPE):
     source = query.data
     state = user_state[query.from_user.id]
 
-    start_date = datetime.utcnow()
+    start_date = datetime.now(timezone.utc)
     end_date = start_date + timedelta(hours=state["hours"])
 
     summaries = []
